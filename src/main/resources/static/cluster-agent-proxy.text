@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+agent_token=
+port=
+name=
+url=
+
+while getopts ":t:p:u:n:" opt
+do
+    case $opt in
+        t)
+        agent_token=$OPTARG
+        ;;
+        p)
+        port=$OPTARG
+        ;;
+        n)
+        name=$OPTARG
+        ;;
+        u)
+        url=$OPTARG
+        ;;
+        ?)
+        echo "未知参数"
+        exit 1;;
+    esac
+done
+
+if test -z "$agent_token"
+then
+    echo '-t is empty,please input -t'
+    exit
+fi
+
+if test -z "$port"
+then
+    echo '-p is empty,please input -p'
+    exit
+fi
+
+if test -z "$name"
+then
+    echo '-n is empty,please input -n'
+    exit
+fi
+
+if test -z "$url"
+then
+    echo '-u is empty,please input -u'
+    exit
+fi
+
+rm -rf cluster-agent-proxy.yaml
+
+
+k8s_token=$(kubectl get secrets -o jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='default')].data.token}"|base64 -d)
+
+echo "
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-agent-proxy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: kube-apiserver
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-agent-proxy
+  labels:
+    app: cluster-agent-proxy
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: cluster-agent-proxy
+  template:
+    metadata:
+      labels:
+        app: cluster-agent-proxy
+    spec:
+      containers:
+      - command:
+        - /entrypoint.sh
+        - --agent.proxy.name=${name}
+        - --agent.proxy.url=${url}
+        - --agent.proxy.token=${agent_token}
+        - --agent.k8s.token=${k8s_token}
+        image: deepexi/cluster-agent-proxy:latest
+        name: cluster-agent-proxy
+        ports:
+        - containerPort: ${port}
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /
+            port: ${port}
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+        imagePullPolicy: IfNotPresent
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster-agent-proxy
+  namespace: default
+  labels:
+    app: cluster-agent-proxy
+spec:
+  ports:
+    - port: ${port}
+      targetPort: ${port}
+  selector:
+    app: cluster-agent-proxy
+  type: LoadBalancer
+--- " >>cluster-agent-proxy.yaml
+
+kubectl apply -f cluster-agent-proxy.yaml
+

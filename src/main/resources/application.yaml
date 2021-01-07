@@ -1,0 +1,20 @@
+server:
+  servlet:
+    context-path: /laker
+spring:
+  mvc:
+    static-path-pattern: /static/**
+  resources:
+    static-locations: classpath:/static/
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+  redis:
+    host: 124.172.188.117
+    port: 6379
+
+logging:
+  level:
+    com.destiny.soul: debug
